@@ -13,19 +13,19 @@ startCounter = 1
 
 # CONNECT TO TELLO
 me = Tello()
-me.connect()
-me.for_back_velocity = 0
-me.left_right_velocity = 0
-me.up_down_velocity = 0
-me.yaw_velocity = 0
-me.speed = 0
+# me.connect()
+# me.for_back_velocity = 0
+# me.left_right_velocity = 0
+# me.up_down_velocity = 0
+# me.yaw_velocity = 0
+# me.speed = 0
 
 
 
-print(me.get_battery())
+# print(me.get_battery())
 
-me.streamoff()
-me.streamon()
+# me.streamoff()
+# me.streamon()
 ######################## 
 
 frameWidth = width
@@ -37,7 +37,7 @@ frameHeight = height
 
 
 global imgContour
-global dir;
+global dir
 def empty(a):
     pass
 
@@ -135,11 +135,13 @@ def display(img):
     cv2.line(img, (0,int(frameHeight / 2) - deadZone), (frameWidth,int(frameHeight / 2) - deadZone), (255, 255, 0), 3)
     cv2.line(img, (0, int(frameHeight / 2) + deadZone), (frameWidth, int(frameHeight / 2) + deadZone), (255, 255, 0), 3)
 
+cap = cv2.VideoCapture(1)
+
 while True:
 
     # GET THE IMAGE FROM TELLO
-    frame_read = me.get_frame_read()
-    myFrame = frame_read.frame
+    ret, frame = cap.read()
+    myFrame = frame if ret else None
     img = cv2.resize(myFrame, (width, height))
     imgContour = img.copy()
     imgHsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
