@@ -1,183 +1,9 @@
-import numpy as np
 import cv2
-from djitellopy import Tello
-from enum import Enum
+from tello import Tello
+debug = True
 
-class Step(Enum):
-    TAKEOFF = 1
-    MOVE_FORWARD = 2
-    MOVE_LEFT = 3
-    MOVE_RIGHT = 4
-    MOVE_BACKWARD = 5
-    MOVE_UP = 6
-    MOVE_DOWN = 7
-    MOVE_CUSTOM =8
-    ROTATE = 9
-    LAND = 10
-    EMERGENCY = 11
-debug = True  # Set to False to enable actual flying
-
-def initialize_tello_drone():
-    global me
-    me = Tello()
-    me.connect()
-    print(f"Battery level: {me.get_battery()}%")
-    me.streamoff()
-    me.streamon()
-
-def get_frame_read():
-    if debug:
-        ret, frame = cap.read()
-        return frame if ret else None
-    else:
-        frame_read = me.get_frame_read()
-        return frame_read.frame if frame_read else None
-
-def move_drone(x, y, z, yaw):
-    if debug:
-        print(f"Moving drone: x={x}, y={y}, z={z}, yaw={yaw}")
-    else:
-        me.send_rc_control(x, y, z, yaw)
-    
-    steps_taken.append({
-        "step": Step.MOVE_CUSTOM,
-        "x": x,
-        "y": y,
-        "z": z,
-        "yaw": yaw
-    })
-
-def rotate_drone(angle):
-    if debug:
-        print(f"Rotating drone: angle={angle}")
-    else:
-        me.rotate_clockwise(angle)
-    
-    steps_taken.append({
-        "step": Step.ROTATE,
-        "angle": angle
-    })
-
-def move_forward(distance):
-    if debug:
-        print(f"Moving forward: distance={distance}")
-    else:
-        me.move_forward(distance)
-    
-    steps_taken.append({
-        "step": Step.MOVE_FORWARD,
-        "distance": distance
-    })
-
-def move_backward(distance):
-    if debug:
-        print(f"Moving backward: distance={distance}")
-    else:
-        me.move_back(distance)
-    
-    steps_taken.append({
-        "step": Step.MOVE_BACKWARD,
-        "distance": distance
-    })
-
-def move_left(distance):
-    if debug:
-        print(f"Moving left: distance={distance}")
-    else:
-        me.move_left(distance)
-    
-    steps_taken.append({
-        "step": Step.MOVE_LEFT,
-        "distance": distance
-    })
-
-def move_right(distance):
-    if debug:
-        print(f"Moving right: distance={distance}")
-    else:
-        me.move_right(distance)
-    
-    steps_taken.append({
-        "step": Step.MOVE_RIGHT,
-        "distance": distance
-    })
-
-def move_up(distance):
-    if debug:
-        print(f"Moving up: distance={distance}")
-    else:
-        me.move_up(distance)
-
-    steps_taken.append({
-        "step": Step.MOVE_UP,
-        "distance": distance
-    })
-
-def move_down(distance):
-    if debug:
-        print(f"Moving down: distance={distance}")
-    else:
-        me.move_down(distance)
-    
-    steps_taken.append({
-        "step": Step.MOVE_DOWN,
-        "distance": distance
-    })
-
-def land():
-    if debug:
-        print("Landing drone.")
-    else:
-        me.land()
-    
-    steps_taken.append({
-        "step": Step.LAND
-    })
-
-def takeoff():
-    if debug:
-        print("Taking off.")
-    else:
-        me.takeoff()
-    
-    steps_taken.append({
-        "step": Step.TAKEOFF
-    })
-
-def emergency():
-    if debug:
-        print("Emergency stop.")
-    else:
-        me.emergency()
-    
-    steps_taken.append({
-        "step": Step.EMERGENCY
-    })
-    
-def set_speed(speed):
-    if debug:
-        print(f"Setting speed: speed={speed}")
-    else:
-        me.set_speed(speed)
-    
-def get_battery():
-    if debug:
-        print(f"Getting battery level.")
-    else:
-        return me.get_battery()
-    
-def calculate_target_location():
-    pass
-
-if debug:
-    cap = cv2.VideoCapture(1)  
-    if not cap.isOpened():
-        print("Error: Camera could not be opened.")
-        quit()
-    else:
-        print("Camera opened successfully.")
-else:
-    initialize_tello_drone()
+# Initialize the Tello drone
+drone = Tello(debug)
 
 # Constants for frame size
 width, height = 640, 480
@@ -195,8 +21,11 @@ flann = cv2.FlannBasedMatcher(index_params, search_params)
 matches_found = []
 steps_taken = []
 
+counter = 0
+prev_matches = 0
+
 while True:
-    myFrame = get_frame_read()
+    myFrame = drone.get_frame_read()
     if myFrame is None:
         print("Failed to capture frame; skipping.")
         continue
@@ -221,21 +50,21 @@ while True:
             img_matches = cv2.drawMatches(ref_image, kp1, img, kp2, good_matches, None, flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
             cv2.imshow('Good Matches', img_matches) # Show the matches
             print(f"Good matches found: {len(good_matches)}")
+            prev_matches = len(good_matches)
         else:
             print(f"Not enough good matches found({len(matches)}, {len(good_matches)}/5")
+            prev_matches = 0
 
-       
         cv2.imshow('Object Tracking', img)  # Show the current frame
 
-        if debug:
-            if cv2.waitKey(1) & 0xFF == ord('p'):
-                img_stream = img.copy()
-                print("saving match")
-                # save the image and matches as well as the tello me cordinates
-                matches_found.append({
-                    "img": img_stream,
-                    "matches": good_matches
-                })
+            
+                # img_stream = img.copy()
+                # print("saving match")
+                # # save the image and matches as well as the tello me cordinates
+                # matches_found.append({
+                #     "img": img_stream,
+                #     "matches": good_matches
+                # })
                 
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -243,8 +72,6 @@ while True:
             me.land()
         break
 
-if debug:
-    cap.release()
 cv2.destroyAllWindows()
 
 # Save the matches found
