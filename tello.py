@@ -181,3 +181,36 @@ class Tello:
         
     def calculate_target_location(self):
         pass
+
+    def move_to_target(self):
+        pass
+    
+    def backtrack(self):
+        steps_taken = self.steps_taken.copy()
+        steps_taken.reverse()
+        for step in steps_taken:
+            if step["step"] == Step.MOVE_FORWARD:
+                self.move_backward(step["distance"])
+            elif step["step"] == Step.MOVE_BACKWARD:
+                self.move_forward(step["distance"])
+            elif step["step"] == Step.MOVE_LEFT:
+                self.move_right(step["distance"])
+            elif step["step"] == Step.MOVE_RIGHT:
+                self.move_left(step["distance"])
+            elif step["step"] == Step.MOVE_UP:
+                self.move_down(step["distance"])
+            elif step["step"] == Step.MOVE_DOWN:
+                self.move_up(step["distance"])
+            elif step["step"] == Step.ROTATE:
+                self.rotate_drone(-step["angle"])
+            elif step["step"] == Step.LAND:
+                self.takeoff()
+            elif step["step"] == Step.TAKEOFF:
+                self.land()
+            elif step["step"] == Step.EMERGENCY:
+                self.emergency()
+            elif step["step"] == Step.MOVE_CUSTOM:
+                self.move_drone(-step["x"], -step["y"], -step["z"], -step["yaw"])
+
+    def reset_steps_taken(self):
+        self.steps_taken = []
