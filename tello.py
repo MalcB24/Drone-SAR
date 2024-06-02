@@ -1,8 +1,9 @@
 
+import asyncio
 from djitellopy import Tello
 from enum import Enum
 import cv2
-
+import time
 class Step(Enum):
     TAKEOFF = 1
     MOVE_FORWARD = 2
@@ -16,120 +17,205 @@ class Step(Enum):
     LAND = 10
     EMERGENCY = 11
 
-class Tello:
+class _Tello:
 
-    def __init__(self, debug=True):
+    id = 0
+
+    def __init__(self, address=None, debug=2, cap_src = 0, verbose=False):
+        self.id = _Tello.id
+        _Tello.id += 1
+
+        self.address = address
         self.debug = debug
-        self.me = None
+        self.verbose = verbose
+        self.speed = 20
+        self.moving = False
+        self.stage = 0
+        self.orientation = 0
+        self.position = (0, 0)
+        self.iteration = 0
+        
+        if debug <2:
+            self.initialize_tello_drone()
         self.steps_taken = []
-        if debug:
-            self.cap = cv2.VideoCapture(1)  
+        if debug == 2:
+            self.cap = cv2.VideoCapture(cap_src)  
             if not self.cap.isOpened():
-                print("Error: Camera could not be opened.")
+                print(f"[drone: {self.id}] [drone: {self.id}] Error: Camera could not be opened.")
                 quit()
             else:
-                print("Camera opened successfully.")
+                print(f"[drone: {self.id}] [drone: {self.id}] Camera opened successfully.")
 
     def initialize_tello_drone(self):
         global me
         me = Tello()
+        if self.address is not None:
+            me.address = self.address
         me.connect()
-        print(f"Battery level: {me.get_battery()}%")
+        print(f"[drone: {self.id}] Battery level: {me.get_battery()}%")
+        me.set_video_direction(1)
         me.streamoff()
         me.streamon()
-
-    def get_frame_read(self):
-        if self.debug:
+        me.set_speed(self.speed)
+    
+    async def get_frame_read(self):
+        if self.debug == 2:
             ret, frame = self.cap.read()
             return frame if ret else None
         else:
             frame_read = me.get_frame_read()
             return frame_read.frame if frame_read else None
 
-    def move_drone(self, x, y, z, yaw):
-        if self.debug:
-            print(f"Moving drone: x={x}, y={y}, z={z}, yaw={yaw}")
-        else:
-            me.send_rc_control(x, y, z, yaw)
+    async def rotate_90(self, mult):
+        await self.rotate_drone(90*-mult)
         
-        self.steps_taken.append({
-            "step": Step.MOVE_CUSTOM,
-            "x": x,
-            "y": y,
-            "z": z,
-            "yaw": yaw
-        })
+        self.orientation = self.orientation + -mult
+        if self.orientation > 3:
+            self.orientation = self.orientation % 4
+        
+        while self.orientation < 0:
+            self.orientation = 4 + self.orientation
 
-    def rotate_drone(self, angle):
-        if self.debug:
-            print(f"Rotating drone: angle={angle}")
-        else:
+    async def orient_north(self):
+
+        if self.orientation == 1:
+            await self.rotate_90(1)
+        elif self.orientation == 2:
+            await self.rotate_90(-2)
+        elif self.orientation == 3:
+            await self.rotate_90(-1)
+
+
+    async def rotate_drone(self, angle):
+        if self.verbose: 
+            print(f"[drone: {self.id}] Rotating drone: angle={angle}")
+        
+        if self.debug == 0:
             me.rotate_clockwise(angle)
         
         self.steps_taken.append({
             "step": Step.ROTATE,
             "angle": angle
         })
+        await asyncio.sleep(abs(angle)/self.speed)
 
-    def move_forward(self, distance):
-        if self.debug:
-            print(f"Moving forward: distance={distance}")
-        else:
+    async def move_forward(self, distance):
+        self.moving = True
+        if self.verbose:
+            print(f"[drone: {self.id}] Moving forward: distance={distance}")
+        if self.debug == 0:
             me.move_forward(distance)
         
         self.steps_taken.append({
             "step": Step.MOVE_FORWARD,
             "distance": distance
         })
+        await asyncio.sleep(distance/self.speed)
+        self.moving = False
 
-    def move_backward(self, distance):
-        if self.debug:
-            print(f"Moving backward: distance={distance}")
-        else:
+        # depending on orientation, update position
+        if self.orientation == 0:
+            self.position = (self.position[0], self.position[1] + distance)
+        elif self.orientation == 1:
+            self.position = (self.position[0] + distance, self.position[1])
+        elif self.orientation == 2:
+            self.position = (self.position[0], self.position[1] - distance)
+        elif self.orientation == 3:
+            self.position = (self.position[0] - distance, self.position[1])
+
+    async def move_backward(self, distance):
+        self.moving = True
+        if self.verbose:
+            print(f"[drone: {self.id}] Moving backward: distance={distance}")
+        if self.debug == 0:
             me.move_back(distance)
         
         self.steps_taken.append({
             "step": Step.MOVE_BACKWARD,
             "distance": distance
         })
+        await asyncio.sleep(distance/self.speed)
+        self.moving = False
 
-    def move_left(self, distance):
-        if self.debug:
-            print(f"Moving left: distance={distance}")
-        else:
+        # depending on orientation, update position
+        if self.orientation == 0:
+            self.position = (self.position[0], self.position[1] - distance)
+        elif self.orientation == 1:
+            self.position = (self.position[0] - distance, self.position[1])
+        elif self.orientation == 2:
+            self.position = (self.position[0], self.position[1] + distance)
+        elif self.orientation == 3:
+            self.position = (self.position[0] + distance, self.position[1])
+
+
+    async def move_left(self, distance):
+        self.moving = True
+        if self.verbose:
+            print(f"[drone: {self.id}] Moving left: distance={distance}")
+        if self.debug == 0:
             me.move_left(distance)
         
         self.steps_taken.append({
             "step": Step.MOVE_LEFT,
             "distance": distance
         })
+        await asyncio.sleep(distance/self.speed)
+        self.moving = False
 
-    def move_right(self, distance):
-        if self.debug:
-            print(f"Moving right: distance={distance}")
-        else:
+        # depending on orientation, update position
+        if self.orientation == 0:
+            self.position = (self.position[0] - distance, self.position[1])
+        elif self.orientation == 1:
+            self.position = (self.position[0], self.position[1] + distance)
+        elif self.orientation == 2:
+            self.position = (self.position[0] + distance, self.position[1])
+        elif self.orientation == 3:
+            self.position = (self.position[0], self.position[1] - distance)
+
+    async def move_right(self, distance):
+        self.moving = True
+        if self.verbose:
+            print(f"[drone: {self.id}] Moving right: distance={distance}")
+        if self.debug == 0:
             me.move_right(distance)
         
         self.steps_taken.append({
             "step": Step.MOVE_RIGHT,
             "distance": distance
         })
+        await asyncio.sleep(distance/self.speed)
+        self.moving = False
 
-    def move_up(self, distance):
-        if self.debug:
-            print(f"Moving up: distance={distance}")
-        else:
+        # depending on orientation, update position
+        if self.orientation == 0:
+            self.position = (self.position[0] + distance, self.position[1])
+        elif self.orientation == 1:
+            self.position = (self.position[0], self.position[1] - distance)
+        elif self.orientation == 2:
+            self.position = (self.position[0] - distance, self.position[1])
+        elif self.orientation == 3:
+            self.position = (self.position[0], self.position[1] + distance)
+
+    async def move_up(self, distance):
+        self.moving = True
+        if self.verbose:
+            print(f"[drone: {self.id}] Moving up: distance={distance}")
+        if self.debug == 0: 
             me.move_up(distance)
 
         self.steps_taken.append({
             "step": Step.MOVE_UP,
             "distance": distance
         })
+        await asyncio.sleep(distance/self.speed)
+        self.moving = False
 
-    def move_down(self, distance):
-        if self.debug:
-            print(f"Moving down: distance={distance}")
-        else:
+    async def move_down(self, distance):
+        self.moving = True
+        if self.verbose:
+            print(f"[drone: {self.id}] Moving down: distance={distance}")
+            
+        if self.debug == 0:
             me.move_down(distance)
         
         self.steps_taken.append({
@@ -137,80 +223,123 @@ class Tello:
             "distance": distance
         })
 
-    def land(self):
-        if self.debug:
-            print("Landing drone.")
-        else:
+        await asyncio.sleep(distance/self.speed)
+        self.moving = False
+
+    async def stop(self):
+        if self.verbose:
+            print(f"[drone: {self.id}] [drone: {self.id}] Stopping drone.")
+        if self.debug == 0:
+            me.send_rc_control(0, 0, 0, 0)
+        self.moving = False
+
+    async def land(self):
+        self.moving = True
+        if self.verbose:
+            print(f"[drone: {self.id}] [drone: {self.id}] Landing drone.")
+            
+        if self.debug == 0:
             me.land()
         
         self.steps_taken.append({
             "step": Step.LAND
         })
+        await asyncio.sleep(5)
+        self.moving = False
 
-    def takeoff(self):
-        if self.debug:
-            print("Taking off.")
-        else:
+    async def takeoff(self):
+        self.moving = True
+        if self.verbose:
+            print(f"[drone: {self.id}] [drone: {self.id}] Taking off.")
+            
+        if self.debug == 0:
             me.takeoff()
         
         self.steps_taken.append({
             "step": Step.TAKEOFF
         })
+        await asyncio.sleep(5)
+        self.moving = False
 
-    def emergency(self):
-        if self.debug:
-            print("Emergency stop.")
-        else:
+    async def emergency(self):
+        self.moving = True
+        if self.verbose:
+            print(f"[drone: {self.id}] [drone: {self.id}] Emergency stop.")
+            
+        if self.debug == 0:
             me.emergency()
         
         self.steps_taken.append({
             "step": Step.EMERGENCY
         })
+        await asyncio.sleep(5)
+        self.moving = False
         
-    def set_speed(self, speed):
-        if self.debug:
-            print(f"Setting speed: speed={speed}")
-        else:
+    async def set_speed(self, speed):
+        if self.verbose:
+            print(f"[drone: {self.id}] Setting speed: speed={speed}")
+        
+        if self.debug == 0:
             me.set_speed(speed)
         
-    def get_battery(self):
-        if self.debug:
-            print(f"Getting battery level.")
-        else:
-            return me.get_battery()
-        
-    def calculate_target_location(self):
-        pass
+    async def get_battery(self):
+        if self.verbose:
+            print(f"[drone: {self.id}] Getting battery level.")
 
-    def move_to_target(self):
-        pass
+        if self.debug == 0:
+            return me.get_battery()
+
+        return 100
     
-    def backtrack(self):
+    async def get_height(self):
+        if self.verbose:
+            print(f"[drone: {self.id}] Getting height.")
+
+        if self.debug == 0:
+            return me.get_height()
+
+        return 20
+        
+            
+    async def backtrack(self):
         steps_taken = self.steps_taken.copy()
         steps_taken.reverse()
         for step in steps_taken:
+            self.moving = True
             if step["step"] == Step.MOVE_FORWARD:
-                self.move_backward(step["distance"])
+                await self.move_backward(step["distance"])
             elif step["step"] == Step.MOVE_BACKWARD:
-                self.move_forward(step["distance"])
+                await self.move_forward(step["distance"])
             elif step["step"] == Step.MOVE_LEFT:
-                self.move_right(step["distance"])
+                await self.move_right(step["distance"])
             elif step["step"] == Step.MOVE_RIGHT:
-                self.move_left(step["distance"])
+                await self.move_left(step["distance"])
             elif step["step"] == Step.MOVE_UP:
-                self.move_down(step["distance"])
+                await self.move_down(step["distance"])
             elif step["step"] == Step.MOVE_DOWN:
-                self.move_up(step["distance"])
+                await self.move_up(step["distance"])
             elif step["step"] == Step.ROTATE:
-                self.rotate_drone(-step["angle"])
+                await self.rotate_drone(-step["angle"])
             elif step["step"] == Step.LAND:
-                self.takeoff()
+                await self.takeoff()
             elif step["step"] == Step.TAKEOFF:
-                self.land()
+                await self.land()
             elif step["step"] == Step.EMERGENCY:
-                self.emergency()
+                await self.emergency()
             elif step["step"] == Step.MOVE_CUSTOM:
-                self.move_drone(-step["x"], -step["y"], -step["z"], -step["yaw"])
+                await self.move_drone(-step["x"], -step["y"], -step["z"], -step["yaw"])
+        self.moving = False
 
-    def reset_steps_taken(self):
+    async def off(self):
+        if self.debug == 2:
+            self.cap.release()
+            cv2.destroyAllWindows()
+        else:
+            me.streamoff()
+            me.end()
+
+    async def reset_steps_taken(self):
         self.steps_taken = []
+
+    async def is_moving(self):
+        return self.moving
