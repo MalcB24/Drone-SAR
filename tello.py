@@ -21,19 +21,20 @@ class _Tello:
 
     id = 0
 
-    def __init__(self, address=None, debug=2, cap_src = 0, verbose=False):
+    def __init__(self, address=None, debug=2, cap_src = 0, speed=10, verbose=False):
         self.id = _Tello.id
         _Tello.id += 1
 
         self.address = address
         self.debug = debug
         self.verbose = verbose
-        self.speed = 20
+        self.speed = speed
         self.moving = False
         self.stage = 0
         self.orientation = 0
         self.position = (0, 0)
         self.iteration = 0
+        self.correction = 10
         
         if debug <2:
             self.initialize_tello_drone()
@@ -41,10 +42,10 @@ class _Tello:
         if debug == 2:
             self.cap = cv2.VideoCapture(cap_src)  
             if not self.cap.isOpened():
-                print(f"[drone: {self.id}] [drone: {self.id}] Error: Camera could not be opened.")
+                print(f"[drone: {self.id}] Error: Camera could not be opened.")
                 quit()
             else:
-                print(f"[drone: {self.id}] [drone: {self.id}] Camera opened successfully.")
+                print(f"[drone: {self.id}] Camera opened successfully.")
 
     def initialize_tello_drone(self):
         global me
@@ -52,12 +53,34 @@ class _Tello:
         if self.address is not None:
             me.address = self.address
         me.connect()
-        print(f"[drone: {self.id}] Battery level: {me.get_battery()}%")
-        me.set_video_direction(1)
-        me.streamoff()
-        me.streamon()
+        bat = me.get_battery()
+        print(f"[drone: {self.id}] Battery level: {bat}%")
+        if bat < 10:
+            print(f"[done: {self.id}] Battery is too low. Please charge now")
+            quit()
+        good_vid = False
+        while not good_vid:
+            self.try_init_video()
+            try:
+                me.get_frame_read()
+                print("frame stream opened")
+                good_vid = True
+            except:
+                print("failed to get frame")
+            
         me.set_speed(self.speed)
     
+    def try_init_video(self):
+        if self.debug == 2:
+            return True
+        else:
+            me.set_video_direction(0)
+            me.streamoff()
+            me.streamon()
+            me.streamoff()
+            me.set_video_direction(1)
+            me.streamon()
+
     async def get_frame_read(self):
         if self.debug == 2:
             ret, frame = self.cap.read()
@@ -91,26 +114,31 @@ class _Tello:
             print(f"[drone: {self.id}] Rotating drone: angle={angle}")
         
         if self.debug == 0:
-            me.rotate_clockwise(angle)
+            if angle < 0:
+                me.rotate_counter_clockwise(-(int)(angle))
+            else:
+                me.rotate_clockwise((int)(angle))
         
         self.steps_taken.append({
             "step": Step.ROTATE,
             "angle": angle
         })
-        await asyncio.sleep(abs(angle)/self.speed)
+        if self.debug > 0:
+            await asyncio.sleep(abs(angle)/self.speed)
 
     async def move_forward(self, distance):
         self.moving = True
         if self.verbose:
             print(f"[drone: {self.id}] Moving forward: distance={distance}")
         if self.debug == 0:
-            me.move_forward(distance)
+            me.move_forward((int)(distance-self.correction))
         
         self.steps_taken.append({
             "step": Step.MOVE_FORWARD,
             "distance": distance
         })
-        await asyncio.sleep(distance/self.speed)
+        if self.debug > 0:
+            await asyncio.sleep(distance/self.speed)
         self.moving = False
 
         # depending on orientation, update position
@@ -128,13 +156,14 @@ class _Tello:
         if self.verbose:
             print(f"[drone: {self.id}] Moving backward: distance={distance}")
         if self.debug == 0:
-            me.move_back(distance)
+            me.move_back((int)(distance-self.correction))
         
         self.steps_taken.append({
             "step": Step.MOVE_BACKWARD,
             "distance": distance
         })
-        await asyncio.sleep(distance/self.speed)
+        if self.debug > 0:
+            await asyncio.sleep(distance/self.speed)
         self.moving = False
 
         # depending on orientation, update position
@@ -153,13 +182,14 @@ class _Tello:
         if self.verbose:
             print(f"[drone: {self.id}] Moving left: distance={distance}")
         if self.debug == 0:
-            me.move_left(distance)
+            me.move_left((int)(distance-(self.correction/2)))
         
         self.steps_taken.append({
             "step": Step.MOVE_LEFT,
             "distance": distance
         })
-        await asyncio.sleep(distance/self.speed)
+        if self.debug > 0:
+            await asyncio.sleep(distance/self.speed)
         self.moving = False
 
         # depending on orientation, update position
@@ -177,13 +207,14 @@ class _Tello:
         if self.verbose:
             print(f"[drone: {self.id}] Moving right: distance={distance}")
         if self.debug == 0:
-            me.move_right(distance)
+            me.move_right((int)(distance-(self.correction/2)))
         
         self.steps_taken.append({
             "step": Step.MOVE_RIGHT,
             "distance": distance
         })
-        await asyncio.sleep(distance/self.speed)
+        if self.debug > 0:
+            await asyncio.sleep(distance/self.speed)
         self.moving = False
 
         # depending on orientation, update position
@@ -201,13 +232,14 @@ class _Tello:
         if self.verbose:
             print(f"[drone: {self.id}] Moving up: distance={distance}")
         if self.debug == 0: 
-            me.move_up(distance)
+            me.move_up((int)(distance))
 
         self.steps_taken.append({
             "step": Step.MOVE_UP,
             "distance": distance
         })
-        await asyncio.sleep(distance/self.speed)
+        if self.debug > 0:
+            await asyncio.sleep(distance/self.speed)
         self.moving = False
 
     async def move_down(self, distance):
@@ -216,19 +248,20 @@ class _Tello:
             print(f"[drone: {self.id}] Moving down: distance={distance}")
             
         if self.debug == 0:
-            me.move_down(distance)
+            me.move_down((int)(distance))
         
         self.steps_taken.append({
             "step": Step.MOVE_DOWN,
             "distance": distance
         })
 
-        await asyncio.sleep(distance/self.speed)
+        if self.debug > 0:
+            await asyncio.sleep(distance/self.speed)
         self.moving = False
 
     async def stop(self):
         if self.verbose:
-            print(f"[drone: {self.id}] [drone: {self.id}] Stopping drone.")
+            print(f"[drone: {self.id}] Stopping drone.")
         if self.debug == 0:
             me.send_rc_control(0, 0, 0, 0)
         self.moving = False
@@ -236,7 +269,7 @@ class _Tello:
     async def land(self):
         self.moving = True
         if self.verbose:
-            print(f"[drone: {self.id}] [drone: {self.id}] Landing drone.")
+            print(f"[drone: {self.id}] Landing drone.")
             
         if self.debug == 0:
             me.land()
@@ -244,13 +277,14 @@ class _Tello:
         self.steps_taken.append({
             "step": Step.LAND
         })
-        await asyncio.sleep(5)
+        if self.debug > 0:
+            await asyncio.sleep(5)
         self.moving = False
 
     async def takeoff(self):
         self.moving = True
         if self.verbose:
-            print(f"[drone: {self.id}] [drone: {self.id}] Taking off.")
+            print(f"[drone: {self.id}] Taking off.")
             
         if self.debug == 0:
             me.takeoff()
@@ -258,13 +292,14 @@ class _Tello:
         self.steps_taken.append({
             "step": Step.TAKEOFF
         })
-        await asyncio.sleep(5)
+        if self.debug > 0:
+            await asyncio.sleep(5)
         self.moving = False
 
     async def emergency(self):
         self.moving = True
         if self.verbose:
-            print(f"[drone: {self.id}] [drone: {self.id}] Emergency stop.")
+            print(f"[drone: {self.id}] Emergency stop.")
             
         if self.debug == 0:
             me.emergency()
@@ -272,7 +307,8 @@ class _Tello:
         self.steps_taken.append({
             "step": Step.EMERGENCY
         })
-        await asyncio.sleep(5)
+        if self.debug > 0:
+            await asyncio.sleep(5)
         self.moving = False
         
     async def set_speed(self, speed):
@@ -292,13 +328,13 @@ class _Tello:
         return 100
     
     async def get_height(self):
+        height = me.get_height() if self.debug == 0 else 40
+
         if self.verbose:
-            print(f"[drone: {self.id}] Getting height.")
+            print(f"[drone: {self.id}] height: {height}")
 
-        if self.debug == 0:
-            return me.get_height()
+        return height
 
-        return 20
         
             
     async def backtrack(self):

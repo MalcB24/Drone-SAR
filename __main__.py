@@ -8,7 +8,18 @@ import asyncio
 
 class DroneSar:
     
-    def __init__(self, image_name='test.png', num_drones =1, addresses=None, bound_x=3, bound_y=3, debug=2, size_of_blocks=50, verbose=False):
+    def __init__(self, 
+                image_name='test.png', 
+                num_drones =1, 
+                addresses=None, 
+                bound_x=3, 
+                bound_y=3, 
+                debug=2,
+                wanted_height=50,
+                size_of_blocks=50,
+                speed=10,
+                start_matches = 70,
+                verbose=False):
         
         if num_drones < 1:
             raise ValueError("Number of drones must be at least 1.")
@@ -24,16 +35,18 @@ class DroneSar:
         self.num_drones = num_drones
         self.drones = []
         self.no_items = 1
-        self.wanted_height = 20
+        self.wanted_height = wanted_height
+        self.start_matches = start_matches
+        self.min_height = 30
 
         self.size_of_blocks = size_of_blocks
         # Initialize the Tello drones
 
         for i in range(num_drones):
             if num_drones == 1:
-                self.drones.append(_Tello(debug=debug, cap_src=1, verbose=verbose))
+                self.drones.append(_Tello(debug=debug, cap_src=1, speed=speed, verbose=verbose))
             else:
-                self.drones.append(_Tello(debug=debug, address=addresses[i], cap_src=1, verbose=verbose))
+                self.drones.append(_Tello(debug=debug, address=addresses[i], cap_src=1, speed=speed, verbose=verbose))
 
         # Constants for frame size
         self.width, self.height = 640, 480
@@ -160,12 +173,12 @@ class DroneSar:
         if pos_x == end_pos_x and pos_y == end_pos_y:
             await self.move_to_start(drone)
             self.next_dir[drone.id] = 'up'
-            drone.iterations += 1
+            drone.iteration += 1
             height = await drone.get_height()
-            if height > 20:
+            if height > self.min_height:
                 new_height = height - 10
-                if new_height < 20:
-                    new_height = 20
+                if new_height < self.min_height:
+                    new_height = self.min_height+1
 
                 await drone.move_down(height - new_height)
             return
@@ -198,6 +211,8 @@ class DroneSar:
 
             # take off
             if drone.stage < 1:
+                if self.verbose:
+                    print("stage 1")
                 await drone.takeoff()
                 height = await drone.get_height()
                 if height < self.wanted_height:
@@ -211,6 +226,8 @@ class DroneSar:
 
             # check surroundings for the item
             if drone.stage == 2:
+                if self.verbose:
+                    print("stage 2")
                 if not await drone.is_moving():
                     duration = 5
                     finish_time = asyncio.get_event_loop().time() + (duration)
@@ -228,7 +245,7 @@ class DroneSar:
                             cv2.imshow(f'Object Tracking [{drone.id}]', img_matches) # Show the matches
                             if self.verbose: print(f"[{drone.id}] Good matches found: {len(matches)}")
                             self.prev_matches[drone.id] = len(matches)
-                            if len(matches) > (40 - (drone.iteration**2)):
+                            if len(matches) > (self.start_matches - (drone.iteration**2)):
                                 drone.stage = 7
                         await asyncio.sleep(0.25)
                     
@@ -237,6 +254,9 @@ class DroneSar:
                 cv2.waitKey(1)
 
             if drone.stage == 7:
+
+                if self.verbose:
+                    print("stage 7")
                 # item found. save coordinates and image and go to home
                 
                 myFrame = await drone.get_frame_read()
@@ -266,8 +286,12 @@ class DroneSar:
                 drone.stage = 8
 
             if  drone.stage == 8:
+
+                if self.verbose:
+                    print("stage 8")
                 await self.move_to_start(drone)
                 await drone.land()
+                await drone.off()
 
                 drone.stage = 9
 
@@ -318,6 +342,20 @@ class DroneSar:
         
         # Show the table in UI
         cv2.imshow("Table of drones", area_large_color)
+    
+    async def safety(self):
+        while True:
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                print("Safety activated")
+                for drone in self.drones:
+                    drone.stage = 8
+                    await drone.land()
+                    await drone.off()
+
+                self.drones = []
+                break
+
+            await asyncio.sleep(0.1)
 
     async def start(self):
         
@@ -327,8 +365,10 @@ class DroneSar:
         # Create a task for updating the table
         table_task = asyncio.create_task(self.update_table())
 
+        safety_task = asyncio.create_task(self.safety())
+
         # Combine all tasks
-        all_tasks = [table_task] + drone_tasks
+        all_tasks = [table_task] + drone_tasks + [safety_task]
 
         # Wait for all tasks to complete
         await asyncio.gather(*all_tasks)
@@ -338,8 +378,18 @@ class DroneSar:
 
 if __name__ == "__main__":
     addresses = ['123','123']
-    dronesar = DroneSar(image_name = 'test1.png', num_drones=2, addresses=addresses, bound_x=1.6, bound_y=1.4, debug=2, size_of_blocks=20, verbose=True)
-    dronesar.wanted_height = 50
+    dronesar = DroneSar(
+                        image_name = 'test.JPG', 
+                        num_drones=1, 
+                        addresses=addresses, 
+                        bound_x=1.4, 
+                        bound_y=2.2, 
+                        debug=0, 
+                        size_of_blocks=44, 
+                        start_matches=100,
+                        wanted_height=50,
+                        verbose=True,
+                        )
     asyncio.run(dronesar.start())
     
     print("Program ended.")
