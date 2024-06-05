@@ -15,7 +15,9 @@ class DroneSar:
                 bound_x=3, 
                 bound_y=3, 
                 debug=2,
+                cap_src = 1,
                 wanted_height=50,
+                minimum_height = 30,
                 size_of_blocks=50,
                 speed=10,
                 start_matches = 70,
@@ -37,22 +39,24 @@ class DroneSar:
         self.no_items = 1
         self.wanted_height = wanted_height
         self.start_matches = start_matches
-        self.min_height = 30
+        self.min_height = minimum_height
 
         self.size_of_blocks = size_of_blocks
         # Initialize the Tello drones
 
         for i in range(num_drones):
             if num_drones == 1:
-                self.drones.append(_Tello(debug=debug, cap_src=1, speed=speed, verbose=verbose))
+                self.drones.append(_Tello(debug=debug, cap_src=cap_src, speed=speed, verbose=verbose))
             else:
-                self.drones.append(_Tello(debug=debug, address=addresses[i], cap_src=1, speed=speed, verbose=verbose))
+                self.drones.append(_Tello(debug=debug, address=addresses[i], cap_src=cap_src, speed=speed, verbose=verbose))
 
         # Constants for frame size
         self.width, self.height = 640, 480
 
-        # Load the reference image and prepare ORB
+        # Load the reference image, convert to grayscale and prepare ORB
         self.ref_image = cv2.imread(image_name, 1)
+        self.ref_image = cv2.resize(self.ref_image, (self.width, self.height))
+        self.ref_image = cv2.cvtColor(self.ref_image, cv2.COLOR_BGR2GRAY)
         self.orb = cv2.ORB_create(nfeatures=1000)
         self.kp1, self.des1 = self.orb.detectAndCompute(self.ref_image, None)
 
@@ -176,11 +180,13 @@ class DroneSar:
             drone.iteration += 1
             height = await drone.get_height()
             if height > self.min_height:
-                new_height = height - 10
+                new_height = height - 20
                 if new_height < self.min_height:
                     new_height = self.min_height+1
 
-                await drone.move_down(height - new_height)
+                diff = height - new_height
+                if diff > 19:
+                    await drone.move_down(diff)
             return
         
         if drone.id not in self.next_dir:
@@ -384,10 +390,12 @@ if __name__ == "__main__":
                         addresses=addresses, 
                         bound_x=1.4, 
                         bound_y=2.2, 
-                        debug=0, 
+                        cap_src =1,
+                        debug=2, 
                         size_of_blocks=44, 
                         start_matches=100,
-                        wanted_height=50,
+                        wanted_height=70,
+                        minimum_height = 40,
                         verbose=True,
                         )
     asyncio.run(dronesar.start())

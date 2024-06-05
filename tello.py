@@ -34,7 +34,8 @@ class _Tello:
         self.orientation = 0
         self.position = (0, 0)
         self.iteration = 0
-        self.correction = 10
+        self.correction = 6
+        self.simulate_time = False
         
         if debug <2:
             self.initialize_tello_drone()
@@ -77,6 +78,7 @@ class _Tello:
             me.set_video_direction(0)
             me.streamoff()
             me.streamon()
+            me.get_frame_read()
             me.streamoff()
             me.set_video_direction(1)
             me.streamon()
@@ -123,10 +125,12 @@ class _Tello:
             "step": Step.ROTATE,
             "angle": angle
         })
-        if self.debug > 0:
+        if self.debug > 0 and self.simulate_time:
             await asyncio.sleep(abs(angle)/self.speed)
 
     async def move_forward(self, distance):
+        if distance < 20:
+            return
         self.moving = True
         if self.verbose:
             print(f"[drone: {self.id}] Moving forward: distance={distance}")
@@ -137,7 +141,7 @@ class _Tello:
             "step": Step.MOVE_FORWARD,
             "distance": distance
         })
-        if self.debug > 0:
+        if self.debug > 0 and self.simulate_time:
             await asyncio.sleep(distance/self.speed)
         self.moving = False
 
@@ -152,6 +156,8 @@ class _Tello:
             self.position = (self.position[0] - distance, self.position[1])
 
     async def move_backward(self, distance):
+        if distance < 20:
+            return
         self.moving = True
         if self.verbose:
             print(f"[drone: {self.id}] Moving backward: distance={distance}")
@@ -162,7 +168,7 @@ class _Tello:
             "step": Step.MOVE_BACKWARD,
             "distance": distance
         })
-        if self.debug > 0:
+        if self.debug > 0 and self.simulate_time:
             await asyncio.sleep(distance/self.speed)
         self.moving = False
 
@@ -178,6 +184,8 @@ class _Tello:
 
 
     async def move_left(self, distance):
+        if distance < 20:
+            return
         self.moving = True
         if self.verbose:
             print(f"[drone: {self.id}] Moving left: distance={distance}")
@@ -188,7 +196,7 @@ class _Tello:
             "step": Step.MOVE_LEFT,
             "distance": distance
         })
-        if self.debug > 0:
+        if self.debug > 0 and self.simulate_time:
             await asyncio.sleep(distance/self.speed)
         self.moving = False
 
@@ -203,6 +211,8 @@ class _Tello:
             self.position = (self.position[0], self.position[1] - distance)
 
     async def move_right(self, distance):
+        if distance < 20:
+            return
         self.moving = True
         if self.verbose:
             print(f"[drone: {self.id}] Moving right: distance={distance}")
@@ -213,7 +223,7 @@ class _Tello:
             "step": Step.MOVE_RIGHT,
             "distance": distance
         })
-        if self.debug > 0:
+        if self.debug > 0 and self.simulate_time:
             await asyncio.sleep(distance/self.speed)
         self.moving = False
 
@@ -228,6 +238,8 @@ class _Tello:
             self.position = (self.position[0], self.position[1] + distance)
 
     async def move_up(self, distance):
+        if distance < 20:
+            return
         self.moving = True
         if self.verbose:
             print(f"[drone: {self.id}] Moving up: distance={distance}")
@@ -238,11 +250,13 @@ class _Tello:
             "step": Step.MOVE_UP,
             "distance": distance
         })
-        if self.debug > 0:
+        if self.debug > 0 and self.simulate_time:
             await asyncio.sleep(distance/self.speed)
         self.moving = False
 
     async def move_down(self, distance):
+        if distance <20:
+            return
         self.moving = True
         if self.verbose:
             print(f"[drone: {self.id}] Moving down: distance={distance}")
@@ -255,7 +269,7 @@ class _Tello:
             "distance": distance
         })
 
-        if self.debug > 0:
+        if self.debug > 0 and self.simulate_time:
             await asyncio.sleep(distance/self.speed)
         self.moving = False
 
@@ -277,7 +291,7 @@ class _Tello:
         self.steps_taken.append({
             "step": Step.LAND
         })
-        if self.debug > 0:
+        if self.debug > 0 and self.simulate_time:
             await asyncio.sleep(5)
         self.moving = False
 
@@ -292,7 +306,7 @@ class _Tello:
         self.steps_taken.append({
             "step": Step.TAKEOFF
         })
-        if self.debug > 0:
+        if self.debug > 0 and self.simulate_time:
             await asyncio.sleep(5)
         self.moving = False
 
@@ -307,7 +321,7 @@ class _Tello:
         self.steps_taken.append({
             "step": Step.EMERGENCY
         })
-        if self.debug > 0:
+        if self.debug > 0 and self.simulate_time:
             await asyncio.sleep(5)
         self.moving = False
         
