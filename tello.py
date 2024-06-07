@@ -34,7 +34,7 @@ class _Tello:
         self.orientation = 0
         self.position = (0, 0)
         self.iteration = 0
-        self.correction = 6
+        self.correction = 0
         self.simulate_time = False
         
         if debug <2:
@@ -50,9 +50,10 @@ class _Tello:
 
     def initialize_tello_drone(self):
         global me
-        me = Tello()
         if self.address is not None:
-            me.address = self.address
+            me = Tello(host=self.address)
+        else:
+            me = Tello()
         me.connect()
         bat = me.get_battery()
         print(f"[drone: {self.id}] Battery level: {bat}%")
@@ -70,6 +71,7 @@ class _Tello:
                 print("failed to get frame")
             
         me.set_speed(self.speed)
+        self.set_response_timeout(10)
     
     def try_init_video(self):
         if self.debug == 2:
@@ -310,6 +312,9 @@ class _Tello:
             await asyncio.sleep(5)
         self.moving = False
 
+    async def set_response_timeout(self, timeout):
+        me.RESPONSE_TIMEOUT = timeout
+
     async def emergency(self):
         self.moving = True
         if self.verbose:
@@ -348,8 +353,6 @@ class _Tello:
             print(f"[drone: {self.id}] height: {height}")
 
         return height
-
-        
             
     async def backtrack(self):
         steps_taken = self.steps_taken.copy()

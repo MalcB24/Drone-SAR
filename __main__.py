@@ -20,7 +20,11 @@ class DroneSar:
                 minimum_height = 30,
                 size_of_blocks=50,
                 speed=10,
-                start_matches = 70,
+                start_matches = 30,
+                max_rounds = 4,
+                accuracy_to_match = 0.75,
+                use_flann = True,
+                detector = 'orb',
                 verbose=False):
         
         if num_drones < 1:
@@ -39,7 +43,10 @@ class DroneSar:
         self.no_items = 1
         self.wanted_height = wanted_height
         self.start_matches = start_matches
+        self.max_rounds = max_rounds
         self.min_height = minimum_height
+        self.accuracy_to_match = accuracy_to_match
+        self.use_flann = use_flann
 
         self.size_of_blocks = size_of_blocks
         # Initialize the Tello drones
@@ -57,14 +64,18 @@ class DroneSar:
         self.ref_image = cv2.imread(image_name, 1)
         self.ref_image = cv2.resize(self.ref_image, (self.width, self.height))
         self.ref_image = cv2.cvtColor(self.ref_image, cv2.COLOR_BGR2GRAY)
-        self.orb = cv2.ORB_create(nfeatures=1000)
-        self.kp1, self.des1 = self.orb.detectAndCompute(self.ref_image, None)
+        
+        self.detector = cv2.ORB_create() if detector == 'orb' else cv2.SIFT_create() if detector == 'sift' else cv2.KAZE_create()
 
-        self.index_params = dict(algorithm=6, table_number=6, key_size=12, multi_probe_level=1)
-        self.search_params = dict(checks=50)
-        self.flann = cv2.FlannBasedMatcher(self.index_params, self.search_params)
+        if self.use_flann:
+            self.kp1, self.des1 = self.detector.detectAndCompute(self.ref_image, None)
 
-        self.prev_matches = {}
+            self.index_params = dict(algorithm=6, table_number=6, key_size=12, multi_probe_level=1) if detector == 'orb' else dict(algorithm=1, trees=5)
+            self.search_params = dict(checks=50)
+            self.flann = cv2.FlannBasedMatcher(self.index_params, self.search_params)
+        else:
+            self.kp1, self.des1 = self.detector.detectAndCompute(self.ref_image,None)
+            self.bf = cv2.BFMatcher()
 
         self.bounds = {"x":bound_x*100,"y":bound_y*100}
         
@@ -111,17 +122,26 @@ class DroneSar:
 
     async def get_matches(self, myFrame):
         img = cv2.resize(myFrame, (self.width, self.height))
-        kp2, des2 = self.orb.detectAndCompute(img, None)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # balance hist
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        img = clahe.apply(img)
+
+        kp2, des2 = self.detector.detectAndCompute(img,None)
 
         if self.des1 is not None and des2 is not None and len(des2) >= 2:  # Ensure there are enough descriptors
-            matches = self.flann.knnMatch(self.des1, des2, k=2)
+            matches = []
+            if self.use_flann:
+                matches = self.flann.knnMatch(self.des1, des2, k=2)
+            else:
+                matches = self.bf.knnMatch(self.des1, des2, k=2)
 
             # Apply ratio test
             good_matches = []
             for match_pair in matches:
                 if len(match_pair) == 2:  # Ensure there are exactly two matched features
                     m, n = match_pair  # m is the best match, n is the second best match
-                    if m.distance < 0.75 * n.distance:
+                    if m.distance < self.accuracy_to_match* n.distance:
                         good_matches.append(m)
 
             return img, good_matches, kp2
@@ -132,7 +152,7 @@ class DroneSar:
         print(f"Moving drone {drone.id} to start position")
         # Move along the x-axis first
         await drone.orient_north()
-        current_x = drone.position[0] / self.size_of_blocks
+        current_x = drone.position[0] // self.size_of_blocks
         target_x = self.quadrants[drone.id]['start'][0]
 
         if current_x != target_x:
@@ -145,7 +165,7 @@ class DroneSar:
                 await drone.move_left(abs(offset_x) * self.size_of_blocks)
 
         # Move along the y-axis next
-        current_y = drone.position[1] / self.size_of_blocks
+        current_y = drone.position[1] // self.size_of_blocks
         target_y = self.quadrants[drone.id]['start'][1]
 
         if current_y != target_y:
@@ -213,7 +233,7 @@ class DroneSar:
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 await drone.land()
                 await drone.off()
-                drone.stage = 8
+                drone.stage = 4
 
             # take off
             if drone.stage < 1:
@@ -237,6 +257,7 @@ class DroneSar:
                 if not await drone.is_moving():
                     duration = 5
                     finish_time = asyncio.get_event_loop().time() + (duration)
+                    comb_matches = []
                     while drone.stage == 2 and (asyncio.get_event_loop().time() < finish_time):
 
                         myFrame = await drone.get_frame_read()
@@ -250,19 +271,30 @@ class DroneSar:
                             img_matches = cv2.drawMatches(self.ref_image, self.kp1, img, kp2, matches, None, flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
                             cv2.imshow(f'Object Tracking [{drone.id}]', img_matches) # Show the matches
                             if self.verbose: print(f"[{drone.id}] Good matches found: {len(matches)}")
-                            self.prev_matches[drone.id] = len(matches)
-                            if len(matches) > (self.start_matches - (drone.iteration**2)):
-                                drone.stage = 7
-                        await asyncio.sleep(0.25)
+                            comb_matches.append(len(matches))
+                        await asyncio.sleep(0.2)
                     
+                    # get average of matches
+                    average_matches = 0
+                    if len(comb_matches) > 0:
+                        average_matches = sum(comb_matches) / len(comb_matches)
+                        print(f"[{drone.id}] Average matches: {average_matches}")
+
+                    matches_needed = self.get_matches_needed(drone.iteration)
+                    print(f"[{drone.id}] Matches needed: {matches_needed}")
+                    if average_matches >= matches_needed:
+                        drone.stage = 3
+                        print(f"[{drone.id}] Item found!")
+                        continue
+
                     await self.move_next_stage_2(drone)
                         
                 cv2.waitKey(1)
 
-            if drone.stage == 7:
+            if drone.stage == 3:
 
                 if self.verbose:
-                    print("stage 7")
+                    print("stage 3")
                 # item found. save coordinates and image and go to home
                 
                 myFrame = await drone.get_frame_read()
@@ -271,7 +303,7 @@ class DroneSar:
                     continue
                 
                 img, matches, kp2 = await self.get_matches(myFrame)
-                drone.stage = 8
+                drone.stage = 4
                 # draw a box around the item on frame
                 if matches is not None:
                     for match in matches:
@@ -288,13 +320,13 @@ class DroneSar:
                     # send other drones to home
                     for other_drone in self.drones:
                         if other_drone.id != drone.id:
-                            other_drone.stage = 8
-                drone.stage = 8
+                            other_drone.stage = 4
+                drone.stage = 4
 
-            if  drone.stage == 8:
+            if  drone.stage == 4:
 
                 if self.verbose:
-                    print("stage 8")
+                    print("stage 4")
                 await self.move_to_start(drone)
                 await drone.land()
                 await drone.off()
@@ -308,6 +340,15 @@ class DroneSar:
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
             await asyncio.sleep(0.1)
+
+    def get_matches_needed(self, iteration):
+        i = self.start_matches - 1
+        j = self.max_rounds
+        frac1 =  i/(j**2)*(iteration**2)
+
+        frac2 = (2*i/j)*iteration
+
+        return frac1 - frac2 + i + 1
 
     def show_table_of_drones(self):
         # Initialize the area with ones (255 in grayscale, which is white)
@@ -354,7 +395,7 @@ class DroneSar:
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 print("Safety activated")
                 for drone in self.drones:
-                    drone.stage = 8
+                    drone.stage = 4
                     await drone.land()
                     await drone.off()
 
@@ -388,15 +429,19 @@ if __name__ == "__main__":
                         image_name = 'test.JPG', 
                         num_drones=1, 
                         addresses=addresses, 
-                        bound_x=1.4, 
-                        bound_y=2.2, 
+                        bound_x=1.3, 
+                        bound_y=1.8, 
                         cap_src =1,
-                        debug=2, 
-                        size_of_blocks=44, 
-                        start_matches=100,
+                        debug=0, 
+                        size_of_blocks=36, 
+                        start_matches=10,
+                        speed=20,
                         wanted_height=70,
                         minimum_height = 40,
+                        accuracy_to_match=0.7,
                         verbose=True,
+                        use_flann=True,
+                        detector='kaze'   #kaze orb or sift
                         )
     asyncio.run(dronesar.start())
     
